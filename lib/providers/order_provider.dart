@@ -48,9 +48,16 @@ class OrderProvider with ChangeNotifier {
         );
       }
 
-      await NotificationService.showNotification(
+      await NotificationService.sendNotificationToUser(
+        userId: cafeId,
         title: 'New Order',
         body: 'Order #${orderId.substring(0, 8)} has been placed',
+        isCafe: true,
+      );
+
+      await NotificationService.showNotification(
+        title: 'Order Placed',
+        body: 'Your order #${orderId.substring(0, 8)} has been placed',
       );
 
       cart.clear();
@@ -85,35 +92,43 @@ class OrderProvider with ChangeNotifier {
             .toList());
   }
 
-  Future<void> updateOrderStatus(String orderId, app_order.OrderStatus status,
-      {String? rejectionReason}) async {
+  Future<void> updateOrderStatus(
+    String orderId,
+    app_order.OrderStatus status, {
+    String? rejectionReason,
+  }) async {
     try {
-      final data = {'status': status.toString().split('.').last};
-      if (rejectionReason != null) {
-        data['rejectionReason'] = rejectionReason;
-      }
+      log('Updating order status: $orderId to ${status.toString()}');
 
       final orderDoc = await _firestore.collection('orders').doc(orderId).get();
       final order =
           app_order.Order.fromJson({...orderDoc.data()!, 'id': orderId});
+      final customerId = order.customerId;
 
-      await _firestore.collection('orders').doc(orderId).update(data);
+      // Update order status
+      await _firestore.collection('orders').doc(orderId).update({
+        'status': status.toString().split('.').last.toLowerCase(),
+        if (rejectionReason != null) 'rejectionReason': rejectionReason,
+      });
 
-      if (status == app_order.OrderStatus.ready ||
-          status == app_order.OrderStatus.rejected ||
-          status == app_order.OrderStatus.completed) {
+      // Handle queue count updates for completed or rejected orders
+      if (status == app_order.OrderStatus.completed ||
+          status == app_order.OrderStatus.rejected) {
         final menuProvider = MenuProvider();
         for (var item in order.items) {
           await menuProvider.decrementQueueCount(item.menuItemId, orderId);
+          log('Decremented queue count for item: ${item.menuItemId} due to ${status.toString()}');
         }
       }
 
+      // Send notification to customer
       String title = '';
       String body = '';
+
       switch (status) {
         case app_order.OrderStatus.approved:
           title = 'Order Approved';
-          body = 'Your order has been approved and will be prepared soon';
+          body = 'Your order #${orderId.substring(0, 8)} has been approved';
           break;
         case app_order.OrderStatus.rejected:
           title = 'Order Rejected';
@@ -121,22 +136,29 @@ class OrderProvider with ChangeNotifier {
           break;
         case app_order.OrderStatus.preparing:
           title = 'Order Being Prepared';
-          body = 'Your order is now being prepared';
+          body = 'Your order #${orderId.substring(0, 8)} is being prepared';
           break;
         case app_order.OrderStatus.ready:
           title = 'Order Ready';
-          body = 'Your order is ready for pickup';
+          body = 'Your order #${orderId.substring(0, 8)} is ready for pickup';
+          break;
+        case app_order.OrderStatus.completed:
+          title = 'Order Completed';
+          body = 'Your order #${orderId.substring(0, 8)} has been completed';
           break;
         default:
-          break;
+          log('Unhandled order status: $status');
+          return;
       }
 
-      if (title.isNotEmpty) {
-        await NotificationService.showNotification(
-          title: title,
-          body: body,
-        );
-      }
+      log('Notification title: $title, body: $body');
+
+      await NotificationService.sendNotificationToUser(
+        userId: customerId,
+        title: title,
+        body: body,
+        isCafe: false,
+      );
 
       notifyListeners();
     } catch (e) {
@@ -168,5 +190,41 @@ class OrderProvider with ChangeNotifier {
           .cast<app_order.Order>()
           .toList();
     });
+  }
+
+  Stream<List<app_order.Order>> streamActiveOrders(String cafeId) {
+    return _firestore
+        .collection('orders')
+        .where('cafeId', isEqualTo: cafeId)
+        .where('status', whereIn: ['approved', 'preparing', 'ready'])
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) =>
+                app_order.Order.fromJson({...doc.data(), 'id': doc.id}))
+            .toList());
+  }
+
+  Stream<List<app_order.Order>> streamCompletedOrders(String cafeId) {
+    return _firestore
+        .collection('orders')
+        .where('cafeId', isEqualTo: cafeId)
+        .where('status', isEqualTo: 'completed')
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) =>
+                app_order.Order.fromJson({...doc.data(), 'id': doc.id}))
+            .toList());
+  }
+
+  Stream<List<app_order.Order>> streamRejectedOrders(String cafeId) {
+    return _firestore
+        .collection('orders')
+        .where('cafeId', isEqualTo: cafeId)
+        .where('status', isEqualTo: 'rejected')
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) =>
+                app_order.Order.fromJson({...doc.data(), 'id': doc.id}))
+            .toList());
   }
 }

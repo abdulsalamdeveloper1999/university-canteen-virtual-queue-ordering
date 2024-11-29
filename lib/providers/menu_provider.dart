@@ -72,13 +72,26 @@ class MenuProvider with ChangeNotifier {
   }
 
   Stream<List<MenuItem>> streamMenuItems(String cafeId) {
+    log('Starting stream for cafe: $cafeId');
+
+    // Clear existing data immediately
+    _menuItems = [];
+    _isInitialized = false;
+    notifyListeners();
+
     return _firestore
         .collection('items')
         .where('cafeId', isEqualTo: cafeId)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => MenuItem.fromJson({...doc.data(), 'id': doc.id}))
-            .toList());
+        .map((snapshot) {
+      log('Received snapshot with ${snapshot.docs.length} items');
+      _menuItems = snapshot.docs
+          .map((doc) => MenuItem.fromJson({...doc.data(), 'id': doc.id}))
+          .toList();
+      _isInitialized = true;
+      notifyListeners();
+      return _menuItems;
+    });
   }
 
   Future<void> updateQueueCount(String itemId, int newCount) async {
@@ -127,13 +140,12 @@ class MenuProvider with ChangeNotifier {
 
       await _firestore.runTransaction((transaction) async {
         final snapshot = await transaction.get(docRef);
-        if (!snapshot.exists) {
-          throw Exception('Item does not exist!');
-        }
-
         final currentItem =
             MenuItem.fromJson({...snapshot.data()!, 'id': itemId});
+
+        // Increment queue count by 1
         final newQueueCount = currentItem.queueCount + 1;
+        // Store order quantity in orderQuantities map
         final newOrderQuantities =
             Map<String, int>.from(currentItem.orderQuantities)
               ..addAll({orderId: quantity});
@@ -143,7 +155,6 @@ class MenuProvider with ChangeNotifier {
           'orderQuantities': newOrderQuantities,
         });
       });
-
       notifyListeners();
     } catch (e) {
       log('Error incrementing queue count: $e');
@@ -157,13 +168,12 @@ class MenuProvider with ChangeNotifier {
 
       await _firestore.runTransaction((transaction) async {
         final snapshot = await transaction.get(docRef);
-        if (!snapshot.exists) {
-          throw Exception('Item does not exist!');
-        }
-
         final currentItem =
             MenuItem.fromJson({...snapshot.data()!, 'id': itemId});
+
+        // Decrement queue count by 1
         final newQueueCount = currentItem.queueCount - 1;
+        // Remove order from orderQuantities map
         final newOrderQuantities =
             Map<String, int>.from(currentItem.orderQuantities)..remove(orderId);
 
@@ -172,7 +182,6 @@ class MenuProvider with ChangeNotifier {
           'orderQuantities': newOrderQuantities,
         });
       });
-
       notifyListeners();
     } catch (e) {
       log('Error decrementing queue count: $e');

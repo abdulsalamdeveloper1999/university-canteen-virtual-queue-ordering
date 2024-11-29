@@ -10,6 +10,7 @@ import '../../widgets/category_filter.dart';
 import '../../services/cloudinary_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MenuManagementScreen extends StatefulWidget {
   const MenuManagementScreen({super.key});
@@ -20,20 +21,112 @@ class MenuManagementScreen extends StatefulWidget {
 
 class _MenuManagementScreenState extends State<MenuManagementScreen> {
   String? _selectedCategory;
+  Stream<List<MenuItem>>? _menuStream;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeData();
-    });
+  void _initializeStream(BuildContext context) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (authProvider.user == null) return;
+
+    _menuStream = FirebaseFirestore.instance
+        .collection('items')
+        .where('cafeId', isEqualTo: authProvider.user!.uid)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => MenuItem.fromJson({...doc.data(), 'id': doc.id}))
+            .toList());
   }
 
-  Future<void> _initializeData() async {
-    if (!mounted) return;
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    await Provider.of<MenuProvider>(context, listen: false)
-        .fetchMenuItems(authProvider.userId!);
+  @override
+  Widget build(BuildContext context) {
+    // Initialize stream in build
+    _initializeStream(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: const Text('Menu Management'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () => _handleSearch(context),
+          ),
+        ],
+      ),
+      body: Consumer<MenuProvider>(
+        // Use Consumer here
+        builder: (context, menuProvider, child) {
+          return StreamBuilder<List<MenuItem>>(
+            stream: _menuStream,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}'));
+              }
+
+              final items = snapshot.data ?? [];
+              if (items.isEmpty) {
+                return const Center(child: Text('No menu items yet'));
+              }
+
+              final categories =
+                  items.map((item) => item.category).toSet().toList()..sort();
+              final filteredItems = _filterMenuItems(items);
+
+              return Column(
+                children: [
+                  CategoryFilter(
+                    categories: categories,
+                    selectedCategory: _selectedCategory,
+                    onCategorySelected: (category) {
+                      setState(() => _selectedCategory = category);
+                    },
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: filteredItems.length,
+                      itemBuilder: (context, index) {
+                        final item = filteredItems[index];
+                        return MenuItemManagementCard(
+                          item: item,
+                          onEdit: () =>
+                              _showAddEditItemDialog(context, item: item),
+                          onDelete: () => menuProvider.deleteMenuItem(item.id),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddEditItemDialog(context),
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Future<void> _handleSearch(BuildContext context) async {
+    try {
+      final snapshot = await _menuStream?.first;
+      if (snapshot == null || !mounted) return;
+
+      final MenuItem? result = await showSearch<MenuItem?>(
+        context: context,
+        delegate: MenuSearchDelegate(snapshot),
+      );
+
+      if (result != null && mounted) {
+        _showAddEditItemDialog(context, item: result);
+      }
+    } catch (e) {
+      log('Search error: $e');
+    }
   }
 
   List<MenuItem> _filterMenuItems(List<MenuItem> items) {
@@ -43,78 +136,6 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
   List<String> _getCategories(List<MenuItem> items) {
     return items.map((item) => item.category).toSet().toList()..sort();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Menu Management'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () async {
-              try {
-                final menuProvider =
-                    Provider.of<MenuProvider>(context, listen: false);
-                final MenuItem? result = await showSearch<MenuItem?>(
-                  context: context,
-                  delegate: MenuSearchDelegate(menuProvider.menuItems),
-                );
-                if (result != null && mounted) {
-                  _showAddEditItemDialog(context, item: result);
-                }
-              } catch (e) {
-                log('Search error: $e');
-              }
-            },
-          ),
-        ],
-      ),
-      body: Consumer<MenuProvider>(
-        builder: (context, menuProvider, _) {
-          if (menuProvider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final items = menuProvider.menuItems;
-          final categories = _getCategories(items);
-          final filteredItems = _filterMenuItems(items);
-
-          if (items.isEmpty) {
-            return const Center(child: Text('No menu items yet'));
-          }
-
-          return Column(
-            children: [
-              CategoryFilter(
-                categories: categories,
-                selectedCategory: _selectedCategory,
-                onCategorySelected: (category) {
-                  if (mounted) {
-                    setState(() => _selectedCategory = category);
-                  }
-                },
-              ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: filteredItems.length,
-                  itemBuilder: (context, index) {
-                    final item = filteredItems[index];
-                    return MenuItemManagementCard(item: item);
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddEditItemDialog(context),
-        child: const Icon(Icons.add),
-      ),
-    );
   }
 
   void _showAddEditItemDialog(BuildContext context, {MenuItem? item}) {
@@ -127,8 +148,15 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
 class MenuItemManagementCard extends StatelessWidget {
   final MenuItem item;
+  final Function() onEdit;
+  final Function() onDelete;
 
-  const MenuItemManagementCard({super.key, required this.item});
+  const MenuItemManagementCard({
+    super.key,
+    required this.item,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -205,39 +233,11 @@ class MenuItemManagementCard extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.edit, color: Colors.white),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (ctx) => MenuItemDialog(item: item),
-                );
-              },
+              onPressed: onEdit,
             ),
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.white),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Delete Item'),
-                    content: const Text(
-                        'Are you sure you want to delete this item?'),
-                    actions: [
-                      TextButton(
-                        child: const Text('Cancel'),
-                        onPressed: () => Navigator.of(ctx).pop(),
-                      ),
-                      TextButton(
-                        child: const Text('Delete'),
-                        onPressed: () {
-                          Provider.of<MenuProvider>(context, listen: false)
-                              .deleteMenuItem(item.id);
-                          Navigator.of(ctx).pop();
-                        },
-                      ),
-                    ],
-                  ),
-                );
-              },
+              onPressed: onDelete,
             ),
           ],
         ),
@@ -425,7 +425,7 @@ class _MenuItemDialogState extends State<MenuItemDialog> {
         isAvailable: _isAvailable,
         queueCount: widget.item?.queueCount ?? 0,
         category: _categoryController.text,
-        cafeId: authProvider.userId!,
+        cafeId: authProvider.user!.uid,
         orderQuantities: widget.item?.orderQuantities ?? {},
         imageUrl: _imageUrl,
       );

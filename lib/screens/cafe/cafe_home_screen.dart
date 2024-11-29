@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../models/user_type.dart';
+import '../../providers/order_provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../models/order.dart' as app_order;
+
 import '../profile/profile_screen.dart';
 import 'menu_management_screen.dart';
 import 'order_management_screen.dart';
 import 'sales_screen.dart';
+// import 'order_provider.dart';
+// import 'auth_provider.dart';
+// import 'badge.dart';
 
 class CafeHomeScreen extends StatefulWidget {
   const CafeHomeScreen({super.key});
@@ -18,73 +25,61 @@ class _CafeHomeScreenState extends State<CafeHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final List<Widget> screens = [
+      const MenuManagementScreen(),
+      const OrderManagementScreen(),
+      const SalesScreen(),
+      const ProfileScreen(userType: UserType.cafe),
+    ];
 
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: const [
-          MenuManagementScreen(),
-          OrderManagementScreen(),
-          SalesScreen(),
-          ProfileScreen(userType: UserType.cafe),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -5),
+      body: screens[_selectedIndex],
+      bottomNavigationBar: Consumer<OrderProvider>(
+        builder: (context, orderProvider, child) {
+          return Container(
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+              color: Colors.black,
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildNavItem(0, Icons.restaurant_menu, 'Menu'),
-            _buildNavItem(1, Icons.receipt_long, 'Orders'),
-            _buildNavItem(2, Icons.analytics, 'Sales'),
-            _buildNavItem(3, Icons.person, 'Profile'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    final isSelected = _selectedIndex == index;
-    final theme = Theme.of(context);
-
-    return InkWell(
-      onTap: () => setState(() => _selectedIndex = index),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isSelected ? theme.primaryColor : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
+            child: BottomNavigationBar(
+              currentIndex: _selectedIndex,
+              onTap: (index) => setState(() => _selectedIndex = index),
+              items: [
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.restaurant_menu),
+                  label: 'Menu',
+                ),
+                BottomNavigationBarItem(
+                  icon: StreamBuilder<List<app_order.Order>>(
+                    stream: orderProvider.streamPendingOrders(
+                      Provider.of<AuthProvider>(context, listen: false)
+                          .user!
+                          .uid,
+                    ),
+                    builder: (context, snapshot) {
+                      final pendingCount = snapshot.data?.length ?? 0;
+                      return Badge(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        isLabelVisible: pendingCount > 0,
+                        label: Text(pendingCount.toString()),
+                        child: const Icon(Icons.receipt_long),
+                      );
+                    },
+                  ),
+                  label: 'Orders',
+                ),
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.bar_chart),
+                  label: 'Sales',
+                ),
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.person),
+                  label: 'Profile',
+                ),
+              ],
             ),
-            child: Icon(
-              icon,
-              color: isSelected ? Colors.white : Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? theme.primaryColor : Colors.grey,
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }

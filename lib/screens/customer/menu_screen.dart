@@ -8,6 +8,7 @@ import '../../models/menu_item.dart';
 import '../../utils/search_delegates.dart';
 import '../../widgets/category_filter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MenuScreen extends StatefulWidget {
   const MenuScreen({super.key});
@@ -18,16 +19,28 @@ class MenuScreen extends StatefulWidget {
 
 class _MenuScreenState extends State<MenuScreen> {
   String? _selectedCategory;
-  bool _isInitialized = false;
+  Stream<List<MenuItem>>? _menuStream;
+  final MenuProvider _menuProvider = MenuProvider();
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_isInitialized) {
-      // Fetch menu items for all cafes
-      Provider.of<MenuProvider>(context, listen: false).fetchAllMenuItems();
-      _isInitialized = true;
-    }
+  void initState() {
+    super.initState();
+    _initializeStream();
+  }
+
+  void _initializeStream() {
+    if (!mounted) return;
+
+    _menuProvider.reset();
+    setState(() {
+      _menuStream = FirebaseFirestore.instance
+          .collection('items')
+          .where('isAvailable', isEqualTo: true)
+          .snapshots()
+          .map((snapshot) => snapshot.docs
+              .map((doc) => MenuItem.fromJson({...doc.data(), 'id': doc.id}))
+              .toList());
+    });
   }
 
   List<MenuItem> _filterMenuItems(List<MenuItem> items) {
@@ -35,54 +48,54 @@ class _MenuScreenState extends State<MenuScreen> {
     return items.where((item) => item.category == _selectedCategory).toList();
   }
 
-  List<String> _getCategories(List<MenuItem> items) {
-    return items.map((item) => item.category).toSet().toList()..sort();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Consumer<MenuProvider>(
-      builder: (context, menuProvider, child) {
-        if (menuProvider.isLoading) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final categories = _getCategories(menuProvider.menuItems);
-        final filteredItems = _filterMenuItems(menuProvider.menuItems);
-
-        return Scaffold(
-          appBar: AppBar(
-            // backgroundColor: Theme.of(context).primaryColor,
-            foregroundColor: Colors.white,
-            automaticallyImplyLeading: false,
-            title: const Text('Menu'),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.search),
-                onPressed: () async {
-                  try {
-                    final MenuItem? result = await showSearch<MenuItem?>(
-                      context: context,
-                      delegate: MenuSearchDelegate(menuProvider.menuItems),
-                    );
-                    if (result != null && mounted) {
-                      Provider.of<CartProvider>(context, listen: false)
-                          .addItem(result);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Item added to cart'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    }
-                  } catch (e) {
-                    log('Search error: $e');
-                  }
-                },
-              ),
-            ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Menu'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () async {
+              try {
+                final MenuItem? result = await showSearch<MenuItem?>(
+                  context: context,
+                  delegate: MenuSearchDelegate(_menuProvider.menuItems),
+                );
+                if (result != null && mounted) {
+                  Provider.of<CartProvider>(context, listen: false)
+                      .addItem(result);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Item added to cart'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                }
+              } catch (e) {
+                log('Search error: $e');
+              }
+            },
           ),
-          body: Column(
+        ],
+      ),
+      body: StreamBuilder<List<MenuItem>>(
+        stream: _menuStream,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final items = snapshot.data ?? [];
+          final categories =
+              items.map((item) => item.category).toSet().toList();
+          final filteredItems = _filterMenuItems(items);
+
+          return Column(
             children: [
               CategoryFilter(
                 categories: categories,
@@ -92,29 +105,39 @@ class _MenuScreenState extends State<MenuScreen> {
                 },
               ),
               Expanded(
-                child: filteredItems.isEmpty
-                    ? const Center(child: Text('No menu items available'))
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(8),
-                        itemCount: filteredItems.length,
-                        itemBuilder: (context, index) {
-                          final item = filteredItems[index];
-                          return MenuItemCard(item: item);
-                        },
-                      ),
+                child: ListView.builder(
+                  itemCount: filteredItems.length,
+                  itemBuilder: (context, index) {
+                    final item = filteredItems[index];
+                    return MenuItemCard(
+                      item: item,
+                      onAddToCart: () {
+                        context.read<CartProvider>().addItem(item);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Added ${item.name} to cart'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             ],
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
 
 class MenuItemCard extends StatelessWidget {
   final MenuItem item;
+  final Function() onAddToCart;
 
-  const MenuItemCard({super.key, required this.item});
+  const MenuItemCard(
+      {super.key, required this.item, required this.onAddToCart});
 
   @override
   Widget build(BuildContext context) {
@@ -200,22 +223,7 @@ class MenuItemCard extends StatelessWidget {
             padding: const EdgeInsets.all(8.0),
             child: IconButton(
               icon: const Icon(Icons.add_shopping_cart, color: Colors.white),
-              onPressed: () {
-                context.read<CartProvider>().addItem(item);
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('Item added to cart'),
-                    duration: const Duration(seconds: 2),
-                    action: SnackBarAction(
-                      label: 'UNDO',
-                      onPressed: () {
-                        context.read<CartProvider>().removeItem(item.id);
-                      },
-                    ),
-                  ),
-                );
-              },
+              onPressed: onAddToCart,
             ),
           ),
         ],

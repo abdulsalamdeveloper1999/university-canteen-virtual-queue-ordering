@@ -8,54 +8,60 @@ import '../screens/customer/customer_home_screen.dart';
 import '../screens/cafe/cafe_home_screen.dart';
 import '../services/notification_service.dart';
 
-enum UserType { customer, cafe }
-
 class AuthProvider with ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  UserType? _userType;
+  User? _user;
+  String? _userType;
   bool _isLoading = false;
 
-  bool get isAuthenticated => _auth.currentUser != null;
-  String? get userId => _auth.currentUser?.uid;
-  UserType? get userType => _userType;
+  User? get user => _user;
+  String? get userType => _userType;
+  String? get userId => user?.uid;
+  bool get isCafe => _userType == 'cafe';
+  bool get isAuthenticated => user != null;
   bool get isLoading => _isLoading;
 
-  Future<void> _updateFCMToken(String userId) async {
+  Future<void> signUp({
+    required String email,
+    required String password,
+    required String name,
+    required String type, // 'cafe' or 'customer'
+    String? cafeLocation,
+  }) async {
     try {
-      final fcmToken = await NotificationService.getToken();
-      if (fcmToken != null) {
-        await _firestore.collection('users').doc(userId).update({
-          'fcmToken': fcmToken,
-          'lastTokenUpdate': FieldValue.serverTimestamp(),
+      final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      if (userCredential.user != null) {
+        // Create user document
+        await _firestore.collection('users').doc(userCredential.user!.uid).set({
+          'name': name,
+          'email': email,
+          'type': type,
+          'cafeLocation': type == 'cafe' ? cafeLocation : null,
+          'createdAt': FieldValue.serverTimestamp(),
         });
+
+        _user = userCredential.user;
+        _userType = type;
+
+        // Save FCM token
+        await NotificationService.saveTokenToDatabase(
+          userCredential.user!.uid,
+          type == 'cafe',
+        );
+
+        notifyListeners();
       }
     } catch (e) {
-      log('Error updating FCM token: $e');
+      rethrow;
     }
   }
 
-  Future<void> initializeUserType() async {
-    final user = _auth.currentUser;
-    if (user != null) {
-      await _loadUserType(user.uid);
-      await _updateFCMToken(user.uid);
-    }
-  }
-
-  Future<void> _loadUserType(String uid) async {
-    try {
-      final userDoc = await _firestore.collection('users').doc(uid).get();
-      _userType =
-          userDoc.data()?['type'] == 'cafe' ? UserType.cafe : UserType.customer;
-      notifyListeners();
-    } catch (e) {
-      log('Error loading user type: $e');
-    }
-  }
-
-  Future<void> signIn(
-      String email, String password, BuildContext context) async {
+  Future<void> signIn(String email, String password) async {
     try {
       _isLoading = true;
       notifyListeners();
@@ -65,108 +71,71 @@ class AuthProvider with ChangeNotifier {
         password: password,
       );
 
-      await _loadUserType(userCredential.user!.uid);
-      await _updateFCMToken(userCredential.user!.uid);
+      if (userCredential.user != null) {
+        _user = userCredential.user;
 
-      if (!context.mounted) return;
+        final doc = await _firestore
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .get();
 
-      if (_userType == UserType.customer) {
-        await NotificationService.subscribeToUserNotifications(
-            userCredential.user!.uid);
-      } else {
-        await NotificationService.subscribeToCafeNotifications(
-            userCredential.user!.uid);
-      }
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => _userType == UserType.customer
-              ? const CustomerHomeScreen()
-              : const CafeHomeScreen(),
-        ),
-      );
-    } catch (e) {
-      _showErrorDialog(context, 'Login failed: ${e.toString()}');
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> signUp(String email, String password, String name, UserType type,
-      BuildContext context) async {
-    try {
-      _isLoading = true;
-      notifyListeners();
-
-      final userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
-      final fcmToken = await NotificationService.getToken();
-
-      await _firestore.collection('users').doc(userCredential.user!.uid).set({
-        'email': email,
-        'name': name,
-        'type': type == UserType.cafe ? 'cafe' : 'customer',
-        'createdAt': FieldValue.serverTimestamp(),
-        'fcmToken': fcmToken,
-        'lastTokenUpdate': FieldValue.serverTimestamp(),
-      });
-
-      _userType = type;
-
-      if (_userType == UserType.customer) {
-        await NotificationService.subscribeToUserNotifications(
-            userCredential.user!.uid);
-      } else {
-        await NotificationService.subscribeToCafeNotifications(
-            userCredential.user!.uid);
-      }
-
-      if (!context.mounted) return;
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (context) => _userType == UserType.customer
-              ? const CustomerHomeScreen()
-              : const CafeHomeScreen(),
-        ),
-      );
-    } catch (e) {
-      _showErrorDialog(context, 'Sign up failed: ${e.toString()}');
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> signOut(BuildContext context) async {
-    try {
-      final userId = _auth.currentUser?.uid;
-      if (userId != null) {
-        if (_userType == UserType.customer) {
-          await NotificationService.unsubscribeFromUserNotifications(userId);
-        } else {
-          await NotificationService.unsubscribeFromCafeNotifications(userId);
+        if (!doc.exists) {
+          throw Exception('User document not found');
         }
 
-        await _firestore.collection('users').doc(userId).update({
-          'fcmToken': FieldValue.delete(),
-          'lastTokenUpdate': FieldValue.serverTimestamp(),
-        });
+        _userType = doc.data()?['type'] as String?;
+
+        if (_userType == null) {
+          throw Exception('User type not found');
+        }
+
+        await NotificationService.saveTokenToDatabase(
+          userCredential.user!.uid,
+          _userType == 'cafe',
+        );
+
+        notifyListeners();
       }
-
-      await _auth.signOut();
-      _userType = null;
-
-      if (!context.mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e) {
-      _showErrorDialog(context, 'Sign out failed: ${e.toString()}');
+      debugPrint('Error signing in: $e');
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
     }
+  }
+
+  void navigateAfterAuth(BuildContext context) {
+    if (_userType == 'cafe') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const CafeHomeScreen()),
+      );
+    } else {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const CustomerHomeScreen()),
+      );
+    }
+  }
+
+  Future<void> signOut() async {
+    await _auth.signOut();
+    _user = null;
+    _userType = null;
     notifyListeners();
+  }
+
+  Future<void> checkAuthState() async {
+    _user = _auth.currentUser;
+    if (_user != null) {
+      final doc = await _firestore.collection('users').doc(_user!.uid).get();
+      if (doc.exists) {
+        _userType = doc.data()?['type'] as String?;
+        notifyListeners();
+      } else {
+        // If user document doesn't exist, sign out
+        await signOut();
+      }
+    }
   }
 
   void _showErrorDialog(BuildContext context, String message) {
@@ -183,5 +152,13 @@ class AuthProvider with ChangeNotifier {
         ],
       ),
     );
+  }
+
+  Future<void> initializeUserType() async {
+    if (_user != null) {
+      final doc = await _firestore.collection('users').doc(_user!.uid).get();
+      _userType = doc.data()?['type'] as String?;
+      notifyListeners();
+    }
   }
 }
