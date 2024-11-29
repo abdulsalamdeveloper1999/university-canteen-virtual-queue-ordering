@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:quickbite_campus/providers/cart_provider.dart';
 
-import '../../providers/auth_provider.dart';
+import '../../models/user_type.dart';
+
 import '../profile/profile_screen.dart';
 import 'menu_screen.dart';
 import 'cart_screen.dart';
@@ -25,37 +28,44 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       body: _screens[_selectedIndex],
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-          color: Colors.black,
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _selectedIndex,
-          onTap: (index) => setState(() => _selectedIndex = index),
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.restaurant_menu),
-              label: 'Menu',
+      bottomNavigationBar: Consumer<CartProvider>(
+        builder: (context, cart, child) {
+          return Container(
+            decoration: const BoxDecoration(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+              color: Colors.black,
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.shopping_cart),
-              label: 'Cart',
+            child: BottomNavigationBar(
+              currentIndex: _selectedIndex,
+              onTap: (index) => setState(() => _selectedIndex = index),
+              items: [
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.restaurant_menu),
+                  label: 'Menu',
+                ),
+                BottomNavigationBarItem(
+                  icon: Badge(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    isLabelVisible: cart.itemCount > 0,
+                    label: Text(cart.itemCount.toString()),
+                    child: const Icon(Icons.shopping_cart),
+                  ),
+                  label: 'Cart',
+                ),
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.receipt_long),
+                  label: 'Orders',
+                ),
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.person),
+                  label: 'Profile',
+                ),
+              ],
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_long),
-              label: 'Orders',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person),
-              label: 'Profile',
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

@@ -1,0 +1,8 @@
+flutter_icons:
+  android: "quickbite_campus"
+  ios: true
+  image_path: "D:/upwork work/university-canteen-virtual-queue-ordering/assets/app_logo.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "D:/upwork work/university-canteen-virtual-queue-ordering/assets/app_logo.png" 

@@ -1,4 +1,3 @@
-import 'package:canteen_management_app/utils/app_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/cart_provider.dart';
@@ -222,7 +221,7 @@ class _OrderButtonState extends State<OrderButton> {
                       await Provider.of<OrderProvider>(context, listen: false)
                           .placeOrder(
                         widget.cart,
-                        authProvider.userId!,
+                        authProvider.user!.uid,
                         cafeId,
                       );
                       if (!mounted) return;

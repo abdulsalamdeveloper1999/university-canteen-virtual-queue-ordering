@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
+import '../../models/user_type.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -14,7 +15,7 @@ class _SignupScreenState extends State<SignupScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  UserType _userType = UserType.customer;
+  String _userType = 'customer';
   bool _isLoading = false;
 
   Future<void> _signup() async {
@@ -24,11 +25,10 @@ class _SignupScreenState extends State<SignupScreen> {
 
     try {
       await Provider.of<AuthProvider>(context, listen: false).signUp(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-        _nameController.text.trim(),
-        _userType,
-        context,
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+        name: _nameController.text.trim(),
+        type: _userType,
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -88,16 +88,16 @@ class _SignupScreenState extends State<SignupScreen> {
                 },
               ),
               const SizedBox(height: 16),
-              DropdownButtonFormField<UserType>(
+              DropdownButtonFormField<String>(
                 value: _userType,
                 decoration: const InputDecoration(labelText: 'Account Type'),
                 items: const [
                   DropdownMenuItem(
-                    value: UserType.customer,
+                    value: 'customer',
                     child: Text('Customer'),
                   ),
                   DropdownMenuItem(
-                    value: UserType.cafe,
+                    value: 'cafe',
                     child: Text('Cafe'),
                   ),
                 ],

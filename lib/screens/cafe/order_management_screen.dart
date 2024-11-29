@@ -7,8 +7,38 @@ import '../../providers/auth_provider.dart';
 import '../../models/order.dart';
 import '../../utils/search_delegates.dart';
 
-class OrderManagementScreen extends StatelessWidget {
+class OrderManagementScreen extends StatefulWidget {
   const OrderManagementScreen({super.key});
+
+  @override
+  _OrderManagementScreenState createState() => _OrderManagementScreenState();
+}
+
+class _OrderManagementScreenState extends State<OrderManagementScreen> {
+  @override
+  void dispose() {
+    // Cancel any active operations
+    super.dispose();
+  }
+
+  Future<void> _updateOrderStatus(String orderId, OrderStatus status) async {
+    if (!mounted) return; // Add mounted check
+
+    try {
+      final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+      await orderProvider.updateOrderStatus(orderId, status);
+
+      if (!mounted) return; // Add mounted check before showing SnackBar
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order status updated')),
+      );
+    } catch (e) {
+      if (!mounted) return; // Add mounted check before showing error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,10 +133,6 @@ class _PendingOrdersList extends StatelessWidget {
           itemCount: orders.length,
           itemBuilder: (ctx, i) {
             final order = orders[i];
-            if (order == null) {
-              // log('Null order at index $i');
-              return const SizedBox(); // Skip null orders
-            }
             return PendingOrderCard(order: order);
           },
         );
@@ -149,7 +175,6 @@ class PendingOrderCard extends StatelessWidget {
             itemCount: order.items.length,
             itemBuilder: (context, index) {
               final item = order.items[index];
-              if (item == null) return const SizedBox();
               return ListTile(
                 title: Text(item.name),
                 trailing: Text('${item.quantity}x \$${item.price}'),
@@ -213,12 +238,34 @@ class PendingOrderCard extends StatelessWidget {
   }
 
   Future<void> _showRejectDialog(BuildContext context) async {
-    final reasonController = TextEditingController();
+    await showRejectOrderDialog(
+      context,
+      order.id,
+      (reason) async {
+        await Provider.of<OrderProvider>(context, listen: false)
+            .updateOrderStatus(
+          order.id,
+          OrderStatus.rejected,
+          rejectionReason: reason,
+        );
+      },
+    );
+  }
+}
 
-    return showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
+Future<void> showRejectOrderDialog(
+  BuildContext context,
+  String orderId,
+  Function(String) onReject,
+) async {
+  final reasonController = TextEditingController();
+
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (dialogContext) => WillPopScope(
+      onWillPop: () async => false,
+      child: AlertDialog(
         title: const Text('Reject Order'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -237,7 +284,10 @@ class PendingOrderCard extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: () {
+              reasonController.dispose();
+              Navigator.of(dialogContext).pop();
+            },
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -245,7 +295,8 @@ class PendingOrderCard extends StatelessWidget {
               backgroundColor: Colors.red,
             ),
             onPressed: () async {
-              if (reasonController.text.isEmpty) {
+              final reason = reasonController.text.trim();
+              if (reason.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Please provide a reason')),
                 );
@@ -253,31 +304,36 @@ class PendingOrderCard extends StatelessWidget {
               }
 
               try {
-                await Provider.of<OrderProvider>(context, listen: false)
-                    .updateOrderStatus(
-                  order.id,
-                  OrderStatus.rejected,
-                  rejectionReason: reasonController.text,
-                );
+                await onReject(reason);
 
-                if (!context.mounted) return;
+                // Always close the dialog first, then show the snackbar
                 Navigator.of(dialogContext).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Order rejected')),
-                );
+
+                if (context.mounted) {
+                  reasonController.dispose();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Order rejected successfully')),
+                  );
+                }
               } catch (e) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error rejecting order: $e')),
-                );
+                log('Error rejecting order: $e');
+                if (context.mounted) {
+                  // Close the dialog even if there's an error
+                  Navigator.of(dialogContext).pop();
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error rejecting order: $e')),
+                  );
+                }
               }
             },
             child: const Text('Reject Order'),
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _OrderList extends StatelessWidget {
@@ -466,40 +522,17 @@ class CafeOrderCard extends StatelessWidget {
   }
 
   void _showRejectDialog(BuildContext context, String orderId) {
-    final reasonController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reject Order'),
-        content: TextField(
-          controller: reasonController,
-          decoration: const InputDecoration(
-            labelText: 'Rejection Reason',
-            hintText: 'Enter reason for rejection',
-          ),
-        ),
-        actions: [
-          TextButton(
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.of(ctx).pop(),
-          ),
-          TextButton(
-            child: const Text('Reject'),
-            onPressed: () {
-              if (reasonController.text.isNotEmpty) {
-                Provider.of<OrderProvider>(context, listen: false)
-                    .updateOrderStatus(
-                  orderId,
-                  OrderStatus.rejected,
-                  rejectionReason: reasonController.text,
-                );
-                Navigator.of(ctx).pop();
-              }
-            },
-          ),
-        ],
-      ),
+    showRejectOrderDialog(
+      context,
+      orderId,
+      (reason) async {
+        await Provider.of<OrderProvider>(context, listen: false)
+            .updateOrderStatus(
+          orderId,
+          OrderStatus.rejected,
+          rejectionReason: reason,
+        );
+      },
     );
   }
 }

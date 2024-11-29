@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../models/user_type.dart';
 import '../../providers/auth_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/cloudinary_service.dart';
 import 'package:image_picker/image_picker.dart';
+
+import '../auth/login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final UserType userType;
@@ -36,7 +39,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final userId = Provider.of<AuthProvider>(context, listen: false).userId;
+    final userId = Provider.of<AuthProvider>(context, listen: false).user?.uid;
     if (userId != null) {
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -92,7 +95,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       setState(() => _isLoading = true);
-      final userId = Provider.of<AuthProvider>(context, listen: false).userId;
+      final userId =
+          Provider.of<AuthProvider>(context, listen: false).user?.uid;
 
       Map<String, dynamic> data = {
         'name': _nameController.text,
@@ -138,8 +142,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () {
-              Provider.of<AuthProvider>(context, listen: false)
-                  .signOut(context);
+              Provider.of<AuthProvider>(context, listen: false).signOut();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
             },
           ),
         ],

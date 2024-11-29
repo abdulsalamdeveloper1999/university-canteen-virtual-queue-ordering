@@ -35,7 +35,7 @@ class OrdersScreen extends StatelessWidget {
           actions: [
             StreamBuilder<List<Order>>(
               stream: Provider.of<OrderProvider>(context)
-                  .streamCustomerOrders(authProvider.userId!),
+                  .streamCustomerOrders(authProvider.user!.uid),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const SizedBox();
 
@@ -62,15 +62,15 @@ class OrdersScreen extends StatelessWidget {
         body: TabBarView(
           children: [
             _OrdersList(
-              userId: authProvider.userId!,
+              userId: authProvider.user!.uid,
               orderType: OrderListType.active,
             ),
             _OrdersList(
-              userId: authProvider.userId!,
+              userId: authProvider.user!.uid,
               orderType: OrderListType.completed,
             ),
             _OrdersList(
-              userId: authProvider.userId!,
+              userId: authProvider.user!.uid,
               orderType: OrderListType.rejected,
             ),
           ],
