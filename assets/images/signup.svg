@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <style>
+    .primary { fill: #2196F3; }
+    .secondary { fill: #64B5F6; }
+  </style>
+  <g>
+    <path class="secondary" d="M250 100c-55.2 0-100 44.8-100 100s44.8 100 100 100 100-44.8 100-100-44.8-100-100-100zm0 30c38.7 0 70 31.3 70 70s-31.3 70-70 70-70-31.3-70-70 31.3-70 70-70z"/>
+    <path class="primary" d="M250 300c-77.2 0-140 62.8-140 140h280c0-77.2-62.8-140-140-140z"/>
+  </g>
+</svg> 

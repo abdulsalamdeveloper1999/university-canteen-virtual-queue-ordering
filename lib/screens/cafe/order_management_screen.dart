@@ -5,7 +5,9 @@ import 'package:provider/provider.dart';
 import '../../providers/order_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/order.dart';
-import '../../utils/search_delegates.dart';
+
+final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+    GlobalKey<ScaffoldMessengerState>();
 
 class OrderManagementScreen extends StatefulWidget {
   const OrderManagementScreen({super.key});
@@ -202,13 +204,18 @@ class PendingOrderCard extends StatelessWidget {
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.close),
-                      label: const Text('Reject'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
+                    child: Consumer<OrderProvider>(
+                      builder: (context, orderProvider, _) =>
+                          ElevatedButton.icon(
+                        icon: const Icon(Icons.close),
+                        label: const Text('Reject'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: orderProvider.isRejecting
+                            ? null
+                            : () => _showRejectDialog(context),
                       ),
-                      onPressed: () => _showRejectDialog(context),
                     ),
                   ),
                 ),
@@ -238,12 +245,13 @@ class PendingOrderCard extends StatelessWidget {
   }
 
   Future<void> _showRejectDialog(BuildContext context) async {
+    final orderProvider = Provider.of<OrderProvider>(context, listen: false);
+
     await showRejectOrderDialog(
       context,
       order.id,
-      (reason) async {
-        await Provider.of<OrderProvider>(context, listen: false)
-            .updateOrderStatus(
+      (String reason) async {
+        await orderProvider.updateOrderStatus(
           order.id,
           OrderStatus.rejected,
           rejectionReason: reason,
@@ -260,80 +268,78 @@ Future<void> showRejectOrderDialog(
 ) async {
   final reasonController = TextEditingController();
 
-  return showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => WillPopScope(
-      onWillPop: () async => false,
-      child: AlertDialog(
-        title: const Text('Reject Order'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Please provide a reason for rejection:'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: reasonController,
-              decoration: const InputDecoration(
-                labelText: 'Reason',
-                border: OutlineInputBorder(),
+  try {
+    final String? reason = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => ScaffoldMessenger(
+        key: _scaffoldMessengerKey,
+        child: PopScope(
+          canPop: false,
+          child: StatefulBuilder(
+            builder: (context, setState) => AlertDialog(
+              title: const Text('Reject Order'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Please provide a reason for rejection:'),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: reasonController,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason',
+                      border: OutlineInputBorder(),
+                    ),
+                    maxLines: 3,
+                  ),
+                ],
               ),
-              maxLines: 3,
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                  ),
+                  onPressed: () async {
+                    final reason = reasonController.text.trim();
+                    if (reason.isEmpty) {
+                      _scaffoldMessengerKey.currentState?.showSnackBar(
+                        const SnackBar(
+                          content: Text('Please provide a reason'),
+                        ),
+                      );
+                      return;
+                    }
+                    Navigator.of(dialogContext).pop(reason);
+                  },
+                  child: const Text('Reject Order'),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              reasonController.dispose();
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            onPressed: () async {
-              final reason = reasonController.text.trim();
-              if (reason.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please provide a reason')),
-                );
-                return;
-              }
-
-              try {
-                await onReject(reason);
-
-                // Always close the dialog first, then show the snackbar
-                Navigator.of(dialogContext).pop();
-
-                if (context.mounted) {
-                  reasonController.dispose();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Order rejected successfully')),
-                  );
-                }
-              } catch (e) {
-                log('Error rejecting order: $e');
-                if (context.mounted) {
-                  // Close the dialog even if there's an error
-                  Navigator.of(dialogContext).pop();
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error rejecting order: $e')),
-                  );
-                }
-              }
-            },
-            child: const Text('Reject Order'),
-          ),
-        ],
       ),
-    ),
-  );
+    );
+
+    if (reason != null && reason.isNotEmpty) {
+      await onReject(reason);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Order rejected successfully')),
+      );
+    }
+  } catch (e) {
+    log('Error rejecting order: $e');
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error rejecting order: $e')),
+    );
+  } finally {
+    reasonController.dispose();
+  }
 }
 
 class _OrderList extends StatelessWidget {
@@ -509,6 +515,8 @@ class CafeOrderCard extends StatelessWidget {
         return Colors.grey;
       case OrderStatus.rejected:
         return Colors.red;
+      case OrderStatus.cancelled:
+        return Colors.red.shade900;
     }
   }
 

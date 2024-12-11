@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/user_type.dart';
 import '../providers/auth_provider.dart';
 import '../screens/cafe/order_management_screen.dart';
+import 'fcm_service.dart';
 
 class NotificationHandler extends StatefulWidget {
   final Widget child;
@@ -17,6 +18,8 @@ class NotificationHandler extends StatefulWidget {
 }
 
 class _NotificationHandlerState extends State<NotificationHandler> {
+  final FCMService _fcmService = FCMService();
+
   @override
   void initState() {
     super.initState();
@@ -25,14 +28,19 @@ class _NotificationHandlerState extends State<NotificationHandler> {
 
   void _setupNotificationHandlers() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      log(message.notification!.title!);
-      log(message.notification!.body!);
-      _handleNotification(message);
+      _fcmService.showNotification(
+        title: message.notification?.title ?? 'New Notification',
+        body: message.notification?.body ?? '',
+        payload: message.data.toString(),
+      );
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleNotificationTap(message);
     });
+
+    // Handle background/terminated messages
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   }
 
   void _handleNotification(RemoteMessage message) {
@@ -124,4 +132,18 @@ class _NotificationHandlerState extends State<NotificationHandler> {
   Widget build(BuildContext context) {
     return widget.child;
   }
+}
+
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Initialize Firebase if needed
+  // await Firebase.initializeApp();
+
+  final fcmService = FCMService();
+  await fcmService.initialize();
+
+  await fcmService.showNotification(
+    title: message.notification?.title ?? 'New Notification',
+    body: message.notification?.body ?? '',
+    payload: message.data.toString(),
+  );
 }

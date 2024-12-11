@@ -4,8 +4,12 @@ import 'dart:developer';
 import 'package:googleapis_auth/auth_io.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class FCMService {
+  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+
   final scopes = [
     'https://www.googleapis.com/auth/firebase.messaging',
     'https://www.googleapis.com/auth/firebase.database',
@@ -15,15 +19,15 @@ class FCMService {
   Future<String> _getAccessToken() async {
     try {
       final serviceAccountJson = dotenv.get('FIREBASE_SERVICE_ACCOUNT');
+      final serviceAccountJsonDecoded = {};
       log('Loading service account...');
 
       if (serviceAccountJson.isEmpty) {
         throw Exception('FIREBASE_SERVICE_ACCOUNT not found in .env file');
       }
-
       final credentials = ServiceAccountCredentials.fromJson(
-          jsonDecode(serviceAccountJson),
-        );
+        serviceAccountJsonDecoded,
+      );
 
       final client = await clientViaServiceAccount(credentials, scopes);
 
@@ -32,6 +36,54 @@ class FCMService {
       log('Error getting access token: $e');
       rethrow;
     }
+  }
+
+  Future<void> initialize() async {
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@drawable/ic_stat_notify');
+
+    const InitializationSettings initializationSettings =
+        InitializationSettings(
+      android: initializationSettingsAndroid,
+    );
+
+    await flutterLocalNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (details) {
+        // Handle notification tap
+      },
+    );
+  }
+
+  Future<void> showNotification({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+      'cafe_orders',
+      'Cafe Orders',
+      channelDescription: 'Notifications for cafe orders',
+      importance: Importance.max,
+      priority: Priority.high,
+      showWhen: true,
+      enableLights: true,
+      enableVibration: true,
+      icon: '@drawable/ic_stat_notify',
+      largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+    );
+
+    const NotificationDetails platformChannelSpecifics =
+        NotificationDetails(android: androidPlatformChannelSpecifics);
+
+    await flutterLocalNotificationsPlugin.show(
+      0, // notification id
+      title,
+      body,
+      platformChannelSpecifics,
+      payload: payload,
+    );
   }
 
   Future<bool> sendNotification({

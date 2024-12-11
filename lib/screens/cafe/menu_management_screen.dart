@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../../providers/menu_provider.dart';
 import '../../models/menu_item.dart';
 import '../../providers/auth_provider.dart';
-import '../../utils/search_delegates.dart';
+
 import '../../widgets/category_filter.dart';
 import '../../services/cloudinary_service.dart';
 import 'package:image_picker/image_picker.dart';
@@ -22,10 +22,27 @@ class MenuManagementScreen extends StatefulWidget {
 class _MenuManagementScreenState extends State<MenuManagementScreen> {
   String? _selectedCategory;
   Stream<List<MenuItem>>? _menuStream;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
-  void _initializeStream(BuildContext context) {
+  @override
+  void initState() {
+    super.initState();
+    _initializeStream();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _initializeStream() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    if (authProvider.user == null) return;
+    if (authProvider.user == null) {
+      log('Error: User is null');
+      return;
+    }
 
     _menuStream = FirebaseFirestore.instance
         .collection('items')
@@ -38,22 +55,12 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Initialize stream in build
-    _initializeStream(context);
-
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: const Text('Menu Management'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () => _handleSearch(context),
-          ),
-        ],
       ),
       body: Consumer<MenuProvider>(
-        // Use Consumer here
         builder: (context, menuProvider, child) {
           return StreamBuilder<List<MenuItem>>(
             stream: _menuStream,
@@ -77,6 +84,35 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
 
               return Column(
                 children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search menu items...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        suffixIcon: _searchQuery.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear),
+                                onPressed: () {
+                                  setState(() {
+                                    _searchController.clear();
+                                    _searchQuery = '';
+                                  });
+                                },
+                              )
+                            : null,
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
+                    ),
+                  ),
                   CategoryFilter(
                     categories: categories,
                     selectedCategory: _selectedCategory,
@@ -111,31 +147,25 @@ class _MenuManagementScreenState extends State<MenuManagementScreen> {
     );
   }
 
-  Future<void> _handleSearch(BuildContext context) async {
-    try {
-      final snapshot = await _menuStream?.first;
-      if (snapshot == null || !mounted) return;
-
-      final MenuItem? result = await showSearch<MenuItem?>(
-        context: context,
-        delegate: MenuSearchDelegate(snapshot),
-      );
-
-      if (result != null && mounted) {
-        _showAddEditItemDialog(context, item: result);
-      }
-    } catch (e) {
-      log('Search error: $e');
-    }
-  }
-
   List<MenuItem> _filterMenuItems(List<MenuItem> items) {
-    if (_selectedCategory == null) return items;
-    return items.where((item) => item.category == _selectedCategory).toList();
-  }
+    var filtered = items;
 
-  List<String> _getCategories(List<MenuItem> items) {
-    return items.map((item) => item.category).toSet().toList()..sort();
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered
+          .where((item) =>
+              item.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              item.category.toLowerCase().contains(_searchQuery.toLowerCase()))
+          .toList();
+    }
+
+    // Apply category filter
+    if (_selectedCategory != null) {
+      filtered =
+          filtered.where((item) => item.category == _selectedCategory).toList();
+    }
+
+    return filtered;
   }
 
   void _showAddEditItemDialog(BuildContext context, {MenuItem? item}) {

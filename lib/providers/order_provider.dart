@@ -11,6 +11,10 @@ class OrderProvider with ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final List<app_order.Order> _orders = [];
 
+  // Add loading state management
+  bool _isRejecting = false;
+  bool get isRejecting => _isRejecting;
+
   List<app_order.Order> get orders => [..._orders];
 
   Future<void> placeOrder(
@@ -98,14 +102,22 @@ class OrderProvider with ChangeNotifier {
     String? rejectionReason,
   }) async {
     try {
+      if (status == app_order.OrderStatus.rejected) {
+        _isRejecting = true;
+        notifyListeners();
+      }
+
       log('Updating order status: $orderId to ${status.toString()}');
 
       final orderDoc = await _firestore.collection('orders').doc(orderId).get();
+      if (!orderDoc.exists) {
+        throw Exception('Order not found');
+      }
+
       final order =
           app_order.Order.fromJson({...orderDoc.data()!, 'id': orderId});
       final customerId = order.customerId;
 
-      // Update order status
       await _firestore.collection('orders').doc(orderId).update({
         'status': status.toString().split('.').last.toLowerCase(),
         if (rejectionReason != null) 'rejectionReason': rejectionReason,
@@ -164,6 +176,11 @@ class OrderProvider with ChangeNotifier {
     } catch (e) {
       log('Error updating order status: $e');
       rethrow;
+    } finally {
+      if (status == app_order.OrderStatus.rejected) {
+        _isRejecting = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -226,5 +243,39 @@ class OrderProvider with ChangeNotifier {
             .map((doc) =>
                 app_order.Order.fromJson({...doc.data(), 'id': doc.id}))
             .toList());
+  }
+
+  Future<void> cancelOrder(String orderId, {required String reason}) async {
+    try {
+      final orderDoc = await _firestore.collection('orders').doc(orderId).get();
+      final order =
+          app_order.Order.fromJson({...orderDoc.data()!, 'id': orderId});
+
+      await _firestore.collection('orders').doc(orderId).update({
+        'status': 'cancelled',
+        'cancelledAt': FieldValue.serverTimestamp(),
+        'cancellationReason': reason,
+      });
+
+      // Decrement queue counts for cancelled order
+      final menuProvider = MenuProvider();
+      for (var item in order.items) {
+        await menuProvider.decrementQueueCount(item.menuItemId, orderId);
+      }
+
+      // Send notification to cafe about cancellation
+      await NotificationService.sendNotificationToUser(
+        userId: order.cafeId,
+        title: 'Order Cancelled',
+        body:
+            'Order #${orderId.substring(0, 8)} has been cancelled by customer',
+        isCafe: true,
+      );
+
+      notifyListeners();
+    } catch (e) {
+      log('Error cancelling order: $e');
+      rethrow;
+    }
   }
 }

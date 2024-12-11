@@ -1,4 +1,14 @@
-enum OrderStatus { pending, approved, preparing, ready, completed, rejected }
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+enum OrderStatus {
+  pending,
+  approved,
+  preparing,
+  ready,
+  completed,
+  rejected,
+  cancelled
+}
 
 class Order {
   final String id;
@@ -9,6 +19,7 @@ class Order {
   final DateTime createdAt;
   final double totalAmount;
   final String? rejectionReason;
+  final DateTime? cancelledAt;
 
   Order({
     required this.id,
@@ -19,6 +30,7 @@ class Order {
     required this.createdAt,
     required this.totalAmount,
     this.rejectionReason,
+    this.cancelledAt,
   });
 
   factory Order.fromJson(Map<String, dynamic> json) {
@@ -41,6 +53,9 @@ class Order {
       createdAt: DateTime.parse(json['createdAt'] as String),
       totalAmount: (json['totalAmount'] as num).toDouble(),
       rejectionReason: json['rejectionReason'] as String?,
+      cancelledAt: json['cancelledAt'] != null
+          ? (json['cancelledAt'] as Timestamp).toDate()
+          : null,
     );
   }
 
@@ -57,6 +72,7 @@ class Order {
       'createdAt': createdAt.toIso8601String(),
       'totalAmount': totalAmount,
       'rejectionReason': rejectionReason,
+      'cancelledAt': cancelledAt?.toIso8601String(),
     };
   }
 }
