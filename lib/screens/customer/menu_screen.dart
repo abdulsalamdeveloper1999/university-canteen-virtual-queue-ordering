@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import '../../providers/menu_provider.dart';
 import '../../providers/cart_provider.dart';
 import '../../models/menu_item.dart';
-import '../../utils/search_delegates.dart';
+
 import '../../widgets/category_filter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,11 +21,19 @@ class _MenuScreenState extends State<MenuScreen> {
   String? _selectedCategory;
   Stream<List<MenuItem>>? _menuStream;
   final MenuProvider _menuProvider = MenuProvider();
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _initializeStream();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _initializeStream() {
@@ -44,8 +52,24 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 
   List<MenuItem> _filterMenuItems(List<MenuItem> items) {
-    if (_selectedCategory == null) return items;
-    return items.where((item) => item.category == _selectedCategory).toList();
+    var filtered = items;
+
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered
+          .where((item) =>
+              item.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+              item.category.toLowerCase().contains(_searchQuery.toLowerCase()))
+          .toList();
+    }
+
+    // Apply category filter
+    if (_selectedCategory != null) {
+      filtered =
+          filtered.where((item) => item.category == _selectedCategory).toList();
+    }
+
+    return filtered;
   }
 
   @override
@@ -53,31 +77,6 @@ class _MenuScreenState extends State<MenuScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Menu'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () async {
-              try {
-                final MenuItem? result = await showSearch<MenuItem?>(
-                  context: context,
-                  delegate: MenuSearchDelegate(_menuProvider.menuItems),
-                );
-                if (result != null && mounted) {
-                  Provider.of<CartProvider>(context, listen: false)
-                      .addItem(result);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Item added to cart'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                }
-              } catch (e) {
-                log('Search error: $e');
-              }
-            },
-          ),
-        ],
       ),
       body: StreamBuilder<List<MenuItem>>(
         stream: _menuStream,
@@ -97,6 +96,35 @@ class _MenuScreenState extends State<MenuScreen> {
 
           return Column(
             children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search menu items...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              setState(() {
+                                _searchController.clear();
+                                _searchQuery = '';
+                              });
+                            },
+                          )
+                        : null,
+                  ),
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                ),
+              ),
               CategoryFilter(
                 categories: categories,
                 selectedCategory: _selectedCategory,

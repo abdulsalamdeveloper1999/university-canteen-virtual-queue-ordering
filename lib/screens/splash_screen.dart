@@ -4,9 +4,6 @@ import '../providers/auth_provider.dart';
 import 'customer/customer_home_screen.dart';
 import 'cafe/cafe_home_screen.dart';
 import 'auth/login_screen.dart';
-import '../services/notification_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../models/user_type.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});

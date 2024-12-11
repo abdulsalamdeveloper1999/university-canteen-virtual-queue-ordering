@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../../providers/order_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/order.dart';
-import '../../utils/search_delegates.dart';
 
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
@@ -15,7 +14,7 @@ class OrdersScreen extends StatelessWidget {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: Colors.transparent,
@@ -26,38 +25,14 @@ class OrdersScreen extends StatelessWidget {
             labelColor: Theme.of(context).primaryColor,
             unselectedLabelColor: Colors.grey,
             indicatorColor: Theme.of(context).primaryColor,
+            isScrollable: true,
             tabs: const [
               Tab(text: 'Active'),
               Tab(text: 'Completed'),
               Tab(text: 'Rejected'),
+              Tab(text: 'Cancelled'),
             ],
           ),
-          actions: [
-            StreamBuilder<List<Order>>(
-              stream: Provider.of<OrderProvider>(context)
-                  .streamCustomerOrders(authProvider.user!.uid),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const SizedBox();
-
-                return IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: () async {
-                    try {
-                      final Order? result = await showSearch<Order?>(
-                        context: context,
-                        delegate: OrderSearchDelegate(snapshot.data!),
-                      );
-                      if (result != null) {
-                        // Handle selected order
-                      }
-                    } catch (e) {
-                      log('Search error: $e');
-                    }
-                  },
-                );
-              },
-            ),
-          ],
         ),
         body: TabBarView(
           children: [
@@ -73,6 +48,10 @@ class OrdersScreen extends StatelessWidget {
               userId: authProvider.user!.uid,
               orderType: OrderListType.rejected,
             ),
+            _OrdersList(
+              userId: authProvider.user!.uid,
+              orderType: OrderListType.cancelled,
+            ),
           ],
         ),
       ),
@@ -80,7 +59,7 @@ class OrdersScreen extends StatelessWidget {
   }
 }
 
-enum OrderListType { active, completed, rejected }
+enum OrderListType { active, completed, rejected, cancelled }
 
 class _OrdersList extends StatelessWidget {
   final String userId;
@@ -108,14 +87,17 @@ class _OrdersList extends StatelessWidget {
         final orders = allOrders.where((order) {
           switch (orderType) {
             case OrderListType.active:
-              return order.status == OrderStatus.pending ||
-                  order.status == OrderStatus.approved ||
-                  order.status == OrderStatus.preparing ||
-                  order.status == OrderStatus.ready;
+              return (order.status == OrderStatus.pending ||
+                      order.status == OrderStatus.approved ||
+                      order.status == OrderStatus.preparing ||
+                      order.status == OrderStatus.ready) &&
+                  order.status != OrderStatus.cancelled;
             case OrderListType.completed:
               return order.status == OrderStatus.completed;
             case OrderListType.rejected:
               return order.status == OrderStatus.rejected;
+            case OrderListType.cancelled:
+              return order.status == OrderStatus.cancelled;
           }
         }).toList();
 
@@ -141,6 +123,8 @@ class _OrdersList extends StatelessWidget {
         return 'No completed orders';
       case OrderListType.rejected:
         return 'No rejected orders';
+      case OrderListType.cancelled:
+        return 'No cancelled orders';
     }
   }
 }
@@ -153,12 +137,13 @@ class OrderCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.all(8),
-      child: ExpansionTile(
-        title: Text('Order #${order.id.substring(0, 8)}'),
-        subtitle: Column(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text('Order #${order.id.substring(0, 8)}'),
             Text(
               'Status: ${order.status.toString().split('.').last.toUpperCase()}',
               style: TextStyle(
@@ -168,22 +153,120 @@ class OrderCard extends StatelessWidget {
             Text(
               'Total: \$${order.totalAmount.toStringAsFixed(2)}',
             ),
+            ...order.items.map(
+              (item) => ListTile(
+                title: Text(item.name),
+                trailing: Text('${item.quantity}x \$${item.price}'),
+              ),
+            ),
+            if (order.status == OrderStatus.rejected &&
+                order.rejectionReason != null)
+              ListTile(
+                title: const Text('Rejection Reason:'),
+                subtitle: Text(order.rejectionReason!),
+                tileColor: Colors.red.withOpacity(0.1),
+              ),
+            if (order.status == OrderStatus.pending ||
+                order.status == OrderStatus.approved)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: ElevatedButton(
+                  onPressed: () => _showCancelConfirmation(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Cancel Order'),
+                ),
+              ),
           ],
         ),
-        children: [
-          ...order.items.map(
-            (item) => ListTile(
-              title: Text(item.name),
-              trailing: Text('${item.quantity}x \$${item.price}'),
+      ),
+    );
+  }
+
+  void _showCancelConfirmation(BuildContext context) {
+    String? selectedReason;
+    final List<String> cancelReasons = [
+      'Changed my mind',
+      'Long waiting time',
+      'Ordered by mistake',
+      'Class/Meeting started',
+      'Other'
+    ];
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Order'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Please select a reason for cancellation:'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              hint: const Text('Select reason'),
+              items: cancelReasons.map((reason) {
+                return DropdownMenuItem(
+                  value: reason,
+                  child: Text(reason),
+                );
+              }).toList(),
+              onChanged: (value) {
+                selectedReason = value;
+              },
             ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No'),
           ),
-          if (order.status == OrderStatus.rejected &&
-              order.rejectionReason != null)
-            ListTile(
-              title: const Text('Rejection Reason:'),
-              subtitle: Text(order.rejectionReason!),
-              tileColor: Colors.red.withOpacity(0.1),
-            ),
+          TextButton(
+            onPressed: () async {
+              if (selectedReason == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please select a reason for cancellation'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(context);
+              try {
+                await context.read<OrderProvider>().cancelOrder(
+                      order.id,
+                      reason: selectedReason!,
+                    );
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Order cancelled successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Failed to cancel order'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Yes', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
     );
@@ -203,6 +286,8 @@ class OrderCard extends StatelessWidget {
         return Colors.grey;
       case OrderStatus.rejected:
         return Colors.red;
+      case OrderStatus.cancelled:
+        return Colors.red.shade900;
     }
   }
 }

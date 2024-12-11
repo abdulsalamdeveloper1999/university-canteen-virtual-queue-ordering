@@ -24,6 +24,7 @@ dependencies:
   googleapis_auth: ^1.6.0
   http: ^1.2.2
   flutter_dotenv: ^5.2.1
+  flutter_svg: ^2.0.9
 
 
 dev_dependencies:
@@ -35,5 +36,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - .env
+    - assets/
     - assets/app_logo.png
+    - .env
+    - assets/images/signup.svg
+    - assets/images/login.svg
